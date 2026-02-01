@@ -1,0 +1,259 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Authentication ───
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ─── Users & Profiles ───
+
+enum UserRole {
+  PATIENT
+  CONTRIBUTOR
+  BOTH
+  ADMIN
+}
+
+enum ActivityLevel {
+  SEDENTARY
+  RECREATIONAL
+  COMPETITIVE_ATHLETE
+  PROFESSIONAL_ATHLETE
+}
+
+model User {
+  id             String    @id @default(cuid())
+  name           String?
+  email          String?   @unique
+  emailVerified  DateTime?
+  image          String?
+  passwordHash   String?
+  role           UserRole  @default(PATIENT)
+  bio            String?   @db.Text
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  accounts       Account[]
+  sessions       Session[]
+  profile        Profile?
+  recordings     Recording[]
+  callsAsPatient Call[]     @relation("PatientCalls")
+  callsAsContributor Call[] @relation("ContributorCalls")
+  reviewsGiven   Review[]   @relation("ReviewAuthor")
+  reviewsReceived Review[]  @relation("ReviewSubject")
+  availability   Availability[]
+  payments       Payment[]
+}
+
+model Profile {
+  id                String        @id @default(cuid())
+  userId            String        @unique
+  user              User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Matching attributes
+  procedureType     String        // e.g., "ACL Reconstruction"
+  procedureDetails  String?       // e.g., "Patellar tendon graft"
+  ageRange          String        // e.g., "20s", "30s", "40s"
+  activityLevel     ActivityLevel
+  recoveryGoals     String[]      // e.g., ["Return to competitive sport"]
+  timeSinceSurgery  String?       // e.g., "3 months", "1 year" (contributors only)
+  surgeryDate       DateTime?
+  complicatingFactors String[]    // e.g., ["Revision surgery", "Bilateral"]
+  lifestyleContext  String[]      // e.g., ["Parent of young kids", "Works from home"]
+
+  // Contributor-specific
+  hourlyRate        Float?        // For live calls (in dollars)
+  isAvailableForCalls Boolean     @default(false)
+
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+}
+
+// ─── Tier 1: Recorded Content ───
+
+enum RecordingStatus {
+  DRAFT
+  PENDING_REVIEW
+  PUBLISHED
+  REJECTED
+}
+
+enum RecordingCategory {
+  WEEKLY_TIMELINE
+  WISH_I_KNEW
+  PRACTICAL_TIPS
+  MENTAL_HEALTH
+  RETURN_TO_ACTIVITY
+  MISTAKES_AND_LESSONS
+}
+
+model Recording {
+  id              String            @id @default(cuid())
+  contributorId   String
+  contributor     User              @relation(fields: [contributorId], references: [id])
+
+  title           String
+  description     String?           @db.Text
+  category        RecordingCategory
+  mediaUrl        String            // S3/cloud storage URL
+  thumbnailUrl    String?
+  durationSeconds Int?
+  isVideo         Boolean           @default(false)
+
+  // Denormalized from contributor profile for search
+  procedureType   String
+  ageRange        String
+  activityLevel   ActivityLevel
+  recoveryGoals   String[]
+
+  status          RecordingStatus   @default(DRAFT)
+  viewCount       Int               @default(0)
+  price           Float             @default(9.99) // Per-recording price
+
+  reviews         Review[]
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  @@index([procedureType])
+  @@index([status])
+}
+
+// ─── Tier 2: Live Calls ───
+
+enum CallStatus {
+  REQUESTED
+  CONFIRMED
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+model Availability {
+  id              String   @id @default(cuid())
+  contributorId   String
+  contributor     User     @relation(fields: [contributorId], references: [id])
+
+  dayOfWeek       Int      // 0=Sunday, 6=Saturday
+  startTime       String   // "09:00" in contributor's timezone
+  endTime         String   // "17:00"
+  timezone        String   @default("America/New_York")
+
+  createdAt       DateTime @default(now())
+}
+
+model Call {
+  id              String     @id @default(cuid())
+  patientId       String
+  patient         User       @relation("PatientCalls", fields: [patientId], references: [id])
+  contributorId   String
+  contributor     User       @relation("ContributorCalls", fields: [contributorId], references: [id])
+
+  scheduledAt     DateTime
+  durationMinutes Int        @default(30) // 30 or 60
+  status          CallStatus @default(REQUESTED)
+  videoRoomUrl    String?    // Twilio/Daily.co room URL
+  questionsInAdvance String? @db.Text
+
+  price           Float      // Total price paid by patient
+  platformFee     Float      // Platform's cut (20-30%)
+  contributorPayout Float    // What contributor receives
+
+  reviews         Review[]
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  @@index([contributorId, scheduledAt])
+  @@index([patientId])
+}
+
+// ─── Reviews & Ratings ───
+
+model Review {
+  id            String     @id @default(cuid())
+  authorId      String
+  author        User       @relation("ReviewAuthor", fields: [authorId], references: [id])
+  subjectId     String
+  subject       User       @relation("ReviewSubject", fields: [subjectId], references: [id])
+
+  recordingId   String?
+  recording     Recording? @relation(fields: [recordingId], references: [id])
+  callId        String?
+  call          Call?      @relation(fields: [callId], references: [id])
+
+  rating        Int        // 1-5
+  matchRelevance Int?      // 1-5 - how well matched was the contributor
+  helpfulness   Int?       // 1-5
+  comment       String?    @db.Text
+
+  createdAt     DateTime   @default(now())
+}
+
+// ─── Payments ───
+
+enum PaymentType {
+  RECORDING_PURCHASE
+  CALL_PAYMENT
+  CONTRIBUTOR_PAYOUT
+  SUBSCRIPTION
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+model Payment {
+  id              String        @id @default(cuid())
+  userId          String
+  user            User          @relation(fields: [userId], references: [id])
+
+  type            PaymentType
+  amount          Float
+  currency        String        @default("usd")
+  status          PaymentStatus @default(PENDING)
+  stripePaymentId String?
+  metadata        Json?
+
+  createdAt       DateTime      @default(now())
+}

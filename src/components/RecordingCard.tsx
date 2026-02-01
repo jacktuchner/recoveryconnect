@@ -1,0 +1,106 @@
+import Link from "next/link";
+
+interface RecordingCardProps {
+  id: string;
+  title: string;
+  contributorName: string;
+  procedureType: string;
+  ageRange: string;
+  activityLevel: string;
+  category: string;
+  durationSeconds?: number | null;
+  isVideo: boolean;
+  price: number;
+  viewCount: number;
+  averageRating?: number;
+  matchScore?: number;
+}
+
+const categoryLabels: Record<string, string> = {
+  WEEKLY_TIMELINE: "Timeline",
+  WISH_I_KNEW: "Wish I Knew",
+  PRACTICAL_TIPS: "Practical Tips",
+  MENTAL_HEALTH: "Mental Health",
+  RETURN_TO_ACTIVITY: "Return to Activity",
+  MISTAKES_AND_LESSONS: "Lessons Learned",
+};
+
+const activityLabels: Record<string, string> = {
+  SEDENTARY: "Sedentary",
+  RECREATIONAL: "Recreational",
+  COMPETITIVE_ATHLETE: "Competitive",
+  PROFESSIONAL_ATHLETE: "Professional",
+};
+
+function formatDuration(seconds: number): string {
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${mins}:${secs.toString().padStart(2, "0")}`;
+}
+
+export default function RecordingCard({
+  id, title, contributorName, procedureType, ageRange, activityLevel,
+  category, durationSeconds, isVideo, price, viewCount, averageRating, matchScore,
+}: RecordingCardProps) {
+  return (
+    <Link href={`/recordings/${id}`} className="block group">
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden hover:shadow-lg hover:border-teal-200 transition-all">
+        <div className="bg-gradient-to-br from-teal-50 to-cyan-50 p-4 relative">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-medium bg-teal-100 text-teal-700 px-2 py-0.5 rounded-full">
+              {isVideo ? "Video" : "Audio"}
+            </span>
+            {matchScore !== undefined && (
+              <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                matchScore >= 80 ? "bg-green-100 text-green-700" :
+                matchScore >= 60 ? "bg-yellow-100 text-yellow-700" :
+                "bg-gray-100 text-gray-600"
+              }`}>
+                {matchScore}% match
+              </span>
+            )}
+          </div>
+          <div className="flex items-center justify-center h-16">
+            <svg className="w-12 h-12 text-teal-300 group-hover:text-teal-400 transition-colors" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M8 5v14l11-7z" />
+            </svg>
+          </div>
+          {durationSeconds && (
+            <span className="absolute bottom-2 right-2 text-xs bg-black/60 text-white px-1.5 py-0.5 rounded">
+              {formatDuration(durationSeconds)}
+            </span>
+          )}
+        </div>
+
+        <div className="p-4">
+          <h3 className="font-semibold text-gray-900 group-hover:text-teal-700 transition-colors line-clamp-2 mb-1">
+            {title}
+          </h3>
+          <p className="text-sm text-gray-500 mb-3">{contributorName}</p>
+
+          <div className="flex flex-wrap gap-1.5 mb-3">
+            <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{procedureType}</span>
+            <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{ageRange}</span>
+            <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">{activityLabels[activityLevel] || activityLevel}</span>
+            <span className="text-xs bg-purple-50 text-purple-600 px-2 py-0.5 rounded-full">{categoryLabels[category] || category}</span>
+          </div>
+
+          <div className="flex items-center justify-between text-sm">
+            <span className="font-semibold text-teal-700">${price.toFixed(2)}</span>
+            <div className="flex items-center gap-3 text-gray-400">
+              {averageRating !== undefined && (
+                <span className="flex items-center gap-0.5">
+                  <svg className="w-3.5 h-3.5 text-yellow-400" fill="currentColor" viewBox="0 0 20 20">
+                    <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                  </svg>
+                  {averageRating.toFixed(1)}
+                </span>
+              )}
+              <span>{viewCount} views</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Link>
+  );
+}
