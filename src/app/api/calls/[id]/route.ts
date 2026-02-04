@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { supabase } from "@/lib/supabase";
+import { stripe } from "@/lib/stripe";
+import { v4 as uuidv4 } from "uuid";
 
 export async function PATCH(
   req: NextRequest,
@@ -18,8 +20,13 @@ export async function PATCH(
     const body = await req.json();
     const { status } = body;
 
-    const call = await prisma.call.findUnique({ where: { id } });
-    if (!call) {
+    const { data: call, error: fetchError } = await supabase
+      .from("Call")
+      .select("*, contributor:User!Call_contributorId_fkey(stripeConnectId, stripeConnectOnboarded)")
+      .eq("id", id)
+      .single();
+
+    if (fetchError || !call) {
       return NextResponse.json({ error: "Call not found" }, { status: 404 });
     }
 
@@ -39,14 +46,49 @@ export async function PATCH(
       );
     }
 
-    const updated = await prisma.call.update({
-      where: { id },
-      data: { status },
-      include: {
-        patient: true,
-        contributor: { include: { profile: true } },
-      },
-    });
+    const { data: updated, error } = await supabase
+      .from("Call")
+      .update({ status, updatedAt: new Date().toISOString() })
+      .eq("id", id)
+      .select("*, patient:User!Call_patientId_fkey(*), contributor:User!Call_contributorId_fkey(*, profile:Profile(*))")
+      .single();
+
+    if (error) throw error;
+
+    // If call is completed and contributor has Stripe Connect, create payout
+    if (status === "COMPLETED" && call.contributor?.stripeConnectId && call.contributor?.stripeConnectOnboarded) {
+      try {
+        // Create a transfer to the contributor's Connect account
+        const transfer = await stripe.transfers.create({
+          amount: Math.round(call.contributorPayout * 100), // Convert to cents
+          currency: "usd",
+          destination: call.contributor.stripeConnectId,
+          metadata: {
+            callId: call.id,
+            contributorId: call.contributorId,
+            patientId: call.patientId,
+          },
+        });
+
+        // Record the payout
+        await supabase.from("Payment").insert({
+          id: uuidv4(),
+          userId: call.contributorId,
+          type: "CONTRIBUTOR_PAYOUT",
+          amount: call.contributorPayout,
+          currency: "usd",
+          status: "COMPLETED",
+          stripePaymentId: transfer.id,
+          metadata: { callId: call.id, transferId: transfer.id },
+          createdAt: new Date().toISOString(),
+        });
+
+        console.log(`Payout created for call ${call.id}: $${call.contributorPayout}`);
+      } catch (payoutError) {
+        // Log but don't fail the call update
+        console.error("Error creating payout:", payoutError);
+      }
+    }
 
     return NextResponse.json(updated);
   } catch (error) {

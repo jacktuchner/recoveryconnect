@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { supabase } from "@/lib/supabase";
 
 export async function GET() {
   try {
@@ -10,11 +10,13 @@ export async function GET() {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const recordings = await prisma.recording.findMany({
-      where: { contributorId: (session.user as any).id },
-      include: { reviews: true },
-      orderBy: { createdAt: "desc" },
-    });
+    const { data: recordings, error } = await supabase
+      .from("Recording")
+      .select("*, reviews:Review(*)")
+      .eq("contributorId", (session.user as any).id)
+      .order("createdAt", { ascending: false });
+
+    if (error) throw error;
 
     return NextResponse.json(recordings);
   } catch (error) {

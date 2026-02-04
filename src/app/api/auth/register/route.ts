@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
-import { prisma } from "@/lib/prisma";
+import { supabase } from "@/lib/supabase";
+import { v4 as uuidv4 } from "uuid";
 
 export async function POST(req: NextRequest) {
   try {
@@ -14,7 +15,12 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const existing = await prisma.user.findUnique({ where: { email } });
+    const { data: existing } = await supabase
+      .from("User")
+      .select("id")
+      .eq("email", email)
+      .single();
+
     if (existing) {
       return NextResponse.json(
         { error: "An account with this email already exists" },
@@ -24,14 +30,24 @@ export async function POST(req: NextRequest) {
 
     const passwordHash = await bcrypt.hash(password, 12);
 
-    const user = await prisma.user.create({
-      data: {
+    const { data: user, error } = await supabase
+      .from("User")
+      .insert({
+        id: uuidv4(),
         name,
         email,
         passwordHash,
         role: role || "PATIENT",
-      },
-    });
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      })
+      .select("id, name, email, role")
+      .single();
+
+    if (error) {
+      console.error("Supabase error:", error);
+      throw error;
+    }
 
     return NextResponse.json(
       { id: user.id, name: user.name, email: user.email, role: user.role },

@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { supabase } from "@/lib/supabase";
 import { calculateMatchScore } from "@/lib/matching";
+import { v4 as uuidv4 } from "uuid";
 
 export async function GET(req: NextRequest) {
   try {
@@ -14,37 +15,37 @@ export async function GET(req: NextRequest) {
     const page = parseInt(searchParams.get("page") || "1");
     const limit = parseInt(searchParams.get("limit") || "12");
 
-    const where: Record<string, unknown> = { status: "PUBLISHED" };
-    if (procedure) where.procedureType = procedure;
-    if (ageRange) where.ageRange = ageRange;
-    if (activityLevel) where.activityLevel = activityLevel;
-    if (category) where.category = category;
+    let query = supabase
+      .from("Recording")
+      .select("*, contributor:User!Recording_contributorId_fkey(*, profile:Profile(*)), reviews:Review(*)", { count: "exact" })
+      .eq("status", "PUBLISHED");
 
-    const [recordings, total] = await Promise.all([
-      prisma.recording.findMany({
-        where,
-        include: {
-          contributor: { include: { profile: true } },
-          reviews: true,
-        },
-        orderBy: { createdAt: "desc" },
-        skip: (page - 1) * limit,
-        take: limit,
-      }),
-      prisma.recording.count({ where }),
-    ]);
+    if (procedure) query = query.eq("procedureType", procedure);
+    if (ageRange) query = query.eq("ageRange", ageRange);
+    if (activityLevel) query = query.eq("activityLevel", activityLevel);
+    if (category) query = query.eq("category", category);
+
+    const { data: recordings, count, error } = await query
+      .order("createdAt", { ascending: false })
+      .range((page - 1) * limit, page * limit - 1);
+
+    if (error) throw error;
+
+    const total = count || 0;
 
     const session = await getServerSession(authOptions);
-    let enrichedRecordings: unknown[] = recordings;
+    let enrichedRecordings: unknown[] = recordings || [];
 
     if (session?.user) {
-      const userProfile = await prisma.profile.findUnique({
-        where: { userId: (session.user as Record<string, string>).id },
-      });
+      const { data: userProfile } = await supabase
+        .from("Profile")
+        .select("*")
+        .eq("userId", (session.user as Record<string, string>).id)
+        .single();
 
-      if (userProfile) {
+      if (userProfile && recordings) {
         enrichedRecordings = recordings
-          .map((rec) => {
+          .map((rec: any) => {
             const score = calculateMatchScore(
               {
                 procedureType: userProfile.procedureType,
@@ -60,10 +61,8 @@ export async function GET(req: NextRequest) {
                 ageRange: rec.ageRange,
                 activityLevel: rec.activityLevel,
                 recoveryGoals: rec.recoveryGoals,
-                complicatingFactors:
-                  rec.contributor.profile?.complicatingFactors || [],
-                lifestyleContext:
-                  rec.contributor.profile?.lifestyleContext || [],
+                complicatingFactors: rec.contributor?.profile?.complicatingFactors || [],
+                lifestyleContext: rec.contributor?.profile?.lifestyleContext || [],
               }
             );
             return {
@@ -72,9 +71,7 @@ export async function GET(req: NextRequest) {
               matchBreakdown: score.breakdown,
             };
           })
-          .sort(
-            (a, b) => b.matchScore - a.matchScore
-          );
+          .sort((a: any, b: any) => b.matchScore - a.matchScore);
       }
     }
 
@@ -104,12 +101,18 @@ export async function POST(req: NextRequest) {
     }
 
     const userId = (session.user as Record<string, string>).id;
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      include: { profile: true },
-    });
 
-    if (!user || !["CONTRIBUTOR", "BOTH", "ADMIN"].includes(user.role)) {
+    const { data: user, error: userError } = await supabase
+      .from("User")
+      .select("*, profile:Profile(*)")
+      .eq("id", userId)
+      .single();
+
+    if (userError || !user) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
+
+    if (!["CONTRIBUTOR", "BOTH", "ADMIN"].includes(user.role)) {
       return NextResponse.json(
         { error: "Only contributors can create recordings" },
         { status: 403 }
@@ -133,6 +136,9 @@ export async function POST(req: NextRequest) {
       durationSeconds,
       isVideo,
       price,
+      faqPromptId,
+      transcription,
+      transcriptionStatus,
     } = body;
 
     if (!title || !category || !mediaUrl) {
@@ -142,8 +148,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const recording = await prisma.recording.create({
-      data: {
+    const { data: recording, error } = await supabase
+      .from("Recording")
+      .insert({
+        id: uuidv4(),
         contributorId: userId,
         title,
         description,
@@ -158,9 +166,17 @@ export async function POST(req: NextRequest) {
         activityLevel: user.profile.activityLevel,
         recoveryGoals: user.profile.recoveryGoals,
         status: "PENDING_REVIEW",
-      },
-      include: { contributor: { include: { profile: true } } },
-    });
+        faqPromptId: faqPromptId || null,
+        transcription: transcription || null,
+        transcriptionStatus: transcriptionStatus || "NONE",
+        viewCount: 0,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      })
+      .select("*, contributor:User!Recording_contributorId_fkey(*, profile:Profile(*))")
+      .single();
+
+    if (error) throw error;
 
     return NextResponse.json(recording, { status: 201 });
   } catch (error) {

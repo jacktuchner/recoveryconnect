@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { supabase } from "@/lib/supabase";
+import { v4 as uuidv4 } from "uuid";
 
 // GET /api/profile - Get current user's profile
 export async function GET() {
@@ -11,9 +12,11 @@ export async function GET() {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const profile = await prisma.profile.findUnique({
-      where: { userId: (session.user as any).id },
-    });
+    const { data: profile } = await supabase
+      .from("Profile")
+      .select("*")
+      .eq("userId", (session.user as any).id)
+      .single();
 
     return NextResponse.json(profile);
   } catch (error) {
@@ -21,6 +24,7 @@ export async function GET() {
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
+
 // POST /api/profile - Create profile
 export async function POST(req: NextRequest) {
   try {
@@ -32,13 +36,20 @@ export async function POST(req: NextRequest) {
     const userId = (session.user as any).id;
     const body = await req.json();
 
-    const existing = await prisma.profile.findUnique({ where: { userId } });
+    const { data: existing } = await supabase
+      .from("Profile")
+      .select("id")
+      .eq("userId", userId)
+      .single();
+
     if (existing) {
       return NextResponse.json({ error: "Profile already exists. Use PUT to update." }, { status: 409 });
     }
 
-    const profile = await prisma.profile.create({
-      data: {
+    const { data: profile, error } = await supabase
+      .from("Profile")
+      .insert({
+        id: uuidv4(),
         userId,
         procedureType: body.procedureType,
         procedureDetails: body.procedureDetails || null,
@@ -50,8 +61,13 @@ export async function POST(req: NextRequest) {
         lifestyleContext: body.lifestyleContext || [],
         hourlyRate: body.hourlyRate || null,
         isAvailableForCalls: body.isAvailableForCalls || false,
-      },
-    });
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
 
     return NextResponse.json(profile, { status: 201 });
   } catch (error) {
@@ -59,6 +75,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
+
 // PUT /api/profile - Update profile
 export async function PUT(req: NextRequest) {
   try {
@@ -70,9 +87,9 @@ export async function PUT(req: NextRequest) {
     const userId = (session.user as any).id;
     const body = await req.json();
 
-    const profile = await prisma.profile.update({
-      where: { userId },
-      data: {
+    const { data: profile, error } = await supabase
+      .from("Profile")
+      .update({
         procedureType: body.procedureType,
         procedureDetails: body.procedureDetails || null,
         ageRange: body.ageRange,
@@ -83,8 +100,13 @@ export async function PUT(req: NextRequest) {
         lifestyleContext: body.lifestyleContext || [],
         hourlyRate: body.hourlyRate || null,
         isAvailableForCalls: body.isAvailableForCalls || false,
-      },
-    });
+        updatedAt: new Date().toISOString(),
+      })
+      .eq("userId", userId)
+      .select()
+      .single();
+
+    if (error) throw error;
 
     return NextResponse.json(profile);
   } catch (error) {

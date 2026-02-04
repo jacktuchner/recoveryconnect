@@ -34,6 +34,12 @@ export default function Navbar() {
             >
               Find a Contributor
             </Link>
+            <Link
+              href="/about"
+              className="text-gray-600 hover:text-teal-600 transition-colors"
+            >
+              About
+            </Link>
             {session ? (
               <>
                 <Link
@@ -95,6 +101,7 @@ export default function Navbar() {
           <div className="md:hidden pb-4 space-y-2">
             <Link href="/browse" className="block py-2 text-gray-600">Browse Recordings</Link>
             <Link href="/browse?tab=contributors" className="block py-2 text-gray-600">Find a Contributor</Link>
+            <Link href="/about" className="block py-2 text-gray-600">About</Link>
             {session ? (
               <>
                 <Link href="/dashboard/patient" className="block py-2 text-gray-600">Dashboard</Link>

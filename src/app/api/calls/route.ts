@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { supabase } from "@/lib/supabase";
 import { PLATFORM_FEE_PERCENT } from "@/lib/constants";
+import { v4 as uuidv4 } from "uuid";
 
 export async function GET() {
   try {
@@ -12,17 +13,14 @@ export async function GET() {
     }
 
     const userId = (session.user as Record<string, string>).id;
-    const calls = await prisma.call.findMany({
-      where: {
-        OR: [{ patientId: userId }, { contributorId: userId }],
-      },
-      include: {
-        patient: true,
-        contributor: { include: { profile: true } },
-        reviews: true,
-      },
-      orderBy: { scheduledAt: "desc" },
-    });
+
+    const { data: calls, error } = await supabase
+      .from("Call")
+      .select("*, patient:User!Call_patientId_fkey(*), contributor:User!Call_contributorId_fkey(*, profile:Profile(*)), reviews:Review(*)")
+      .or(`patientId.eq.${userId},contributorId.eq.${userId}`)
+      .order("scheduledAt", { ascending: false });
+
+    if (error) throw error;
 
     return NextResponse.json(calls);
   } catch (error) {
@@ -53,12 +51,13 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const contributor = await prisma.user.findUnique({
-      where: { id: contributorId },
-      include: { profile: true },
-    });
+    const { data: contributor, error: contribError } = await supabase
+      .from("User")
+      .select("*, profile:Profile(*)")
+      .eq("id", contributorId)
+      .single();
 
-    if (!contributor?.profile?.isAvailableForCalls) {
+    if (contribError || !contributor?.profile?.isAvailableForCalls) {
       return NextResponse.json(
         { error: "This contributor is not available for calls" },
         { status: 400 }
@@ -71,23 +70,26 @@ export async function POST(req: NextRequest) {
     const platformFee = price * (PLATFORM_FEE_PERCENT / 100);
     const contributorPayout = price - platformFee;
 
-    const call = await prisma.call.create({
-      data: {
+    const { data: call, error } = await supabase
+      .from("Call")
+      .insert({
+        id: uuidv4(),
         patientId: userId,
         contributorId,
-        scheduledAt: new Date(scheduledAt),
+        scheduledAt: new Date(scheduledAt).toISOString(),
         durationMinutes: duration,
         questionsInAdvance,
         price,
         platformFee,
         contributorPayout,
         status: "REQUESTED",
-      },
-      include: {
-        patient: true,
-        contributor: { include: { profile: true } },
-      },
-    });
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      })
+      .select("*, patient:User!Call_patientId_fkey(*), contributor:User!Call_contributorId_fkey(*, profile:Profile(*))")
+      .single();
+
+    if (error) throw error;
 
     return NextResponse.json(call, { status: 201 });
   } catch (error) {

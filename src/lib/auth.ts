@@ -1,11 +1,9 @@
 import { NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
-import { PrismaAdapter } from "@auth/prisma-adapter";
 import bcrypt from "bcryptjs";
-import { prisma } from "./prisma";
+import { supabase } from "./supabase";
 
 export const authOptions: NextAuthOptions = {
-  adapter: PrismaAdapter(prisma) as NextAuthOptions["adapter"],
   providers: [
     CredentialsProvider({
       name: "credentials",
@@ -16,11 +14,13 @@ export const authOptions: NextAuthOptions = {
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) return null;
 
-        const user = await prisma.user.findUnique({
-          where: { email: credentials.email },
-        });
+        const { data: user, error } = await supabase
+          .from("User")
+          .select("id, email, name, passwordHash, role, image")
+          .eq("email", credentials.email)
+          .single();
 
-        if (!user || !user.passwordHash) return null;
+        if (error || !user || !user.passwordHash) return null;
 
         const isValid = await bcrypt.compare(
           credentials.password,

@@ -1,0 +1,51 @@
+import { NextRequest, NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
+import { generatePresignedUploadUrl } from "@/lib/s3";
+
+export async function POST(req: NextRequest) {
+  try {
+    const session = await getServerSession(authOptions);
+    if (!session?.user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const userId = (session.user as Record<string, string>).id;
+    const body = await req.json();
+    const { filename, contentType } = body;
+
+    if (!filename || !contentType) {
+      return NextResponse.json(
+        { error: "Filename and contentType are required" },
+        { status: 400 }
+      );
+    }
+
+    // Validate content type for audio files
+    const allowedTypes = [
+      "audio/webm",
+      "audio/mp4",
+      "audio/mpeg",
+      "audio/ogg",
+      "audio/wav",
+      "video/webm",
+      "video/mp4",
+    ];
+    if (!allowedTypes.includes(contentType)) {
+      return NextResponse.json(
+        { error: "Invalid content type. Allowed: audio/webm, audio/mp4, audio/mpeg, audio/ogg, audio/wav, video/webm, video/mp4" },
+        { status: 400 }
+      );
+    }
+
+    const result = await generatePresignedUploadUrl(filename, contentType, userId);
+
+    return NextResponse.json(result);
+  } catch (error) {
+    console.error("Error generating presigned URL:", error);
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 }
+    );
+  }
+}

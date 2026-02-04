@@ -1,6 +1,7 @@
 generator client {
-  provider = "prisma-client-js"
-  output   = "../src/generated/prisma"
+  provider      = "prisma-client-js"
+  output        = "../src/generated/prisma"
+  binaryTargets = ["native", "windows"]
 }
 
 datasource db {
@@ -72,6 +73,10 @@ model User {
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
+  // Stripe Connect (for contributor payouts)
+  stripeConnectId        String?
+  stripeConnectOnboarded Boolean @default(false)
+
   accounts       Account[]
   sessions       Session[]
   profile        Profile?
@@ -82,6 +87,7 @@ model User {
   reviewsReceived Review[]  @relation("ReviewSubject")
   availability   Availability[]
   payments       Payment[]
+  recordingAccess RecordingAccess[]
 }
 
 model Profile {
@@ -126,6 +132,23 @@ enum RecordingCategory {
   MISTAKES_AND_LESSONS
 }
 
+enum TranscriptionStatus {
+  NONE
+  PENDING
+  COMPLETED
+  FAILED
+}
+
+model FaqPrompt {
+  id          String            @id @default(cuid())
+  question    String
+  category    RecordingCategory
+  isActive    Boolean           @default(true)
+  sortOrder   Int               @default(0)
+  createdAt   DateTime          @default(now())
+  recordings  Recording[]
+}
+
 model Recording {
   id              String            @id @default(cuid())
   contributorId   String
@@ -139,6 +162,14 @@ model Recording {
   durationSeconds Int?
   isVideo         Boolean           @default(false)
 
+  // FAQ prompt association
+  faqPromptId     String?
+  faqPrompt       FaqPrompt?        @relation(fields: [faqPromptId], references: [id])
+
+  // Transcription
+  transcription       String?           @db.Text
+  transcriptionStatus TranscriptionStatus @default(NONE)
+
   // Denormalized from contributor profile for search
   procedureType   String
   ageRange        String
@@ -150,11 +181,13 @@ model Recording {
   price           Float             @default(9.99) // Per-recording price
 
   reviews         Review[]
+  purchases       RecordingAccess[]
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
 
   @@index([procedureType])
   @@index([status])
+  @@index([faqPromptId])
 }
 
 // ─── Tier 2: Live Calls ───
@@ -253,7 +286,24 @@ model Payment {
   currency        String        @default("usd")
   status          PaymentStatus @default(PENDING)
   stripePaymentId String?
+  stripeSessionId String?       @unique
   metadata        Json?
 
+  recordingAccess RecordingAccess?
   createdAt       DateTime      @default(now())
+}
+
+// ─── Recording Access ───
+
+model RecordingAccess {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  recordingId String
+  recording   Recording @relation(fields: [recordingId], references: [id], onDelete: Cascade)
+  paymentId   String?   @unique
+  payment     Payment?  @relation(fields: [paymentId], references: [id])
+  grantedAt   DateTime  @default(now())
+
+  @@unique([userId, recordingId])
 }

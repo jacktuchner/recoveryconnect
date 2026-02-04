@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { supabase } from "@/lib/supabase";
 import { calculateMatchScore } from "@/lib/matching";
 
 export async function GET(req: NextRequest) {
@@ -11,40 +11,49 @@ export async function GET(req: NextRequest) {
     const page = parseInt(searchParams.get("page") || "1");
     const limit = parseInt(searchParams.get("limit") || "12");
 
-    const where: Record<string, unknown> = {
-      role: { in: ["CONTRIBUTOR", "BOTH"] },
-      profile: { isNot: null },
-    };
+    let query = supabase
+      .from("User")
+      .select("*, profile:Profile(*), recordings:Recording(*), reviewsReceived:Review(*)", { count: "exact" })
+      .in("role", ["CONTRIBUTOR", "BOTH"])
+      .not("profile", "is", null);
 
     if (procedure) {
-      where.profile = { ...(where.profile as object), procedureType: procedure };
+      // We'll filter in memory since Supabase doesn't support filtering on joined tables directly
     }
 
-    const [contributors, total] = await Promise.all([
-      prisma.user.findMany({
-        where,
-        include: {
-          profile: true,
-          recordings: { where: { status: "PUBLISHED" }, take: 5 },
-          reviewsReceived: true,
-        },
-        skip: (page - 1) * limit,
-        take: limit,
-      }),
-      prisma.user.count({ where }),
-    ]);
+    const { data: allContributors, count, error } = await query;
+
+    if (error) throw error;
+
+    // Filter by procedure if specified
+    let filteredContributors = allContributors || [];
+    if (procedure) {
+      filteredContributors = filteredContributors.filter(
+        (c: any) => c.profile?.procedureType === procedure
+      );
+    }
+
+    const total = filteredContributors.length;
+
+    // Paginate
+    const paginatedContributors = filteredContributors.slice(
+      (page - 1) * limit,
+      page * limit
+    );
 
     const session = await getServerSession(authOptions);
-    let results: unknown[] = contributors;
+    let results: unknown[] = paginatedContributors;
 
     if (session?.user) {
-      const userProfile = await prisma.profile.findUnique({
-        where: { userId: (session.user as Record<string, string>).id },
-      });
+      const { data: userProfile } = await supabase
+        .from("Profile")
+        .select("*")
+        .eq("userId", (session.user as Record<string, string>).id)
+        .single();
 
       if (userProfile) {
-        results = contributors
-          .map((c) => {
+        results = paginatedContributors
+          .map((c: any) => {
             if (!c.profile)
               return { ...c, matchScore: 0, matchBreakdown: [] };
             const score = calculateMatchScore(
@@ -74,9 +83,7 @@ export async function GET(req: NextRequest) {
             };
           })
           .sort(
-            (a, b) =>
-              (b as { matchScore: number }).matchScore -
-              (a as { matchScore: number }).matchScore
+            (a: any, b: any) => b.matchScore - a.matchScore
           );
       }
     }

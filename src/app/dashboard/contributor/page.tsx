@@ -2,13 +2,14 @@
 
 import { useSession } from "next-auth/react";
 import { useState, useEffect } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   PROCEDURE_TYPES, AGE_RANGES, ACTIVITY_LEVELS, RECOVERY_GOALS,
-  COMPLICATING_FACTORS, LIFESTYLE_CONTEXTS, TIME_SINCE_SURGERY,
-  RECORDING_CATEGORIES, MIN_CALL_RATE, MAX_CALL_RATE,
+  TIME_SINCE_SURGERY, MIN_CALL_RATE, MAX_CALL_RATE,
 } from "@/lib/constants";
+import RecordingForm from "@/components/RecordingForm";
+import ContributorGuidelines from "@/components/ContributorGuidelines";
+import StripeConnectSetup from "@/components/StripeConnectSetup";
 
 export default function ContributorDashboard() {
   const { data: session, status } = useSession();
@@ -34,14 +35,6 @@ export default function ContributorDashboard() {
     isAvailableForCalls: false,
   });
 
-  const [recForm, setRecForm] = useState({
-    title: "",
-    description: "",
-    category: "WEEKLY_TIMELINE",
-    mediaUrl: "",
-    isVideo: false,
-    price: 9.99,
-  });
 
   useEffect(() => {
     if (status === "unauthenticated") router.push("/auth/signin");
@@ -106,25 +99,9 @@ export default function ContributorDashboard() {
     }
   }
 
-  async function createRecording() {
-    setSaving(true);
-    try {
-      const res = await fetch("/api/recordings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(recForm),
-      });
-      if (res.ok) {
-        const newRec = await res.json();
-        setRecordings((prev) => [newRec, ...prev]);
-        setShowRecordingForm(false);
-        setRecForm({ title: "", description: "", category: "WEEKLVETBMMELINE", mediaUrl: "", isVideo: false, price: 9.99 });
-      }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setSaving(false);
-    }
+  function handleRecordingSuccess(recording: Record<string, unknown>) {
+    setRecordings((prev) => [recording, ...prev]);
+    setShowRecordingForm(false);
   }
 
   async function updateCallStatus(callId: string, newStatus: string) {
@@ -303,61 +280,14 @@ export default function ContributorDashboard() {
         </div>
 
         {showRecordingForm && (
-          <div className="bg-gray-50 rounded-lg p-5 mb-6 space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Title *</label>
-              <input type="text" value={recForm.title}
-                onChange={(e) => setRecForm(f => ({...f, title: e.target.value}))}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                placeholder="e.g., My Week-by-Week ACL Recovery Timeline" />
+          <ContributorGuidelines>
+            <div className="mb-6">
+              <RecordingForm
+                onSuccess={handleRecordingSuccess}
+                onCancel={() => setShowRecordingForm(false)}
+              />
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Category *</label>
-              <select value={recForm.category}
-                onChange={(e) => setRecForm(f => ({...f, category: e.target.value}))}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
-                {RECORDING_CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label} - {c.description}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
-              <textarea value={recForm.description}
-                onChange={(e) => setRecForm(f => ({...f, description: e.target.value}))}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" rows={3}
-                placeholder="Brief description of what you cover in this recording" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Media URL *</label>
-              <input type="url" value={recForm.mediaUrl}
-                onChange={(e) => setRecForm(f => ({...f, mediaUrl: e.target.value}))}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                placeholder="URL to your recording file" />
-              <p className="text-xs text-gray-400 mt-1">Upload your recording and paste the URL here. Direct file upload coming soon.</p>
-            </div>
-            <div className="grid sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Price ($)</label>
-                <input type="number" min={5} max={15} step={0.01} value={recForm.price}
-                  onChange={(e) => setRecForm(f => ({...f, price: parseFloat(e.target.value) || 9.99}))}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" />
-              </div>
-              <div className="flex items-end">
-                <label className="flex items-center gap-2 text-sm text-gray-700">
-                  <input type="checkbox" checked={recForm.isVideo}
-                    onChange={(e) => setRecForm(f => ({...f, isVideo: e.target.checked}))}
-                    className="rounded border-gray-300 text-teal-600" />
-                  This is a video recording
-                </label>
-              </div>
-            </div>
-            <div className="flex gap-3">
-              <button onClick={createRecording} disabled={saving || !recForm.title || !recForm.mediaUrl}
-                className="bg-teal-600 text-white px-5 py-2 rounded-lg hover:bg-teal-700 disabled:opacity-50 text-sm font-medium">
-                {saving ? "Submitting..." : "Submit for Review"}
-              </button>
-              <button onClick={() => setShowRecordingForm(false)} className="text-sm text-gray-500 px-4 py-2">Cancel</button>
-            </div>
-          </div>
+          </ContributorGuidelines>
         )}
 
         {recordings.length === 0 && !showRecordingForm ? (
@@ -368,7 +298,18 @@ export default function ContributorDashboard() {
               <div key={rec.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
                 <div>
                   <p className="font-medium">{rec.title}</p>
-                  <p className="text-sm text-gray-500">{rec.category.replace(/_/g, " ")} &middot; ${rec.price} &middot; {rec.viewCount} views</p>
+                  <p className="text-sm text-gray-500">
+                    {rec.category.replace(/_/g, " ")} &middot; ${rec.price} &middot; {rec.viewCount} views
+                    {rec.transcriptionStatus && rec.transcriptionStatus !== "NONE" && (
+                      <span className={`ml-2 ${
+                        rec.transcriptionStatus === "COMPLETED" ? "text-green-600" :
+                        rec.transcriptionStatus === "PENDING" ? "text-yellow-600" :
+                        "text-red-600"
+                      }`}>
+                        &middot; Transcription: {rec.transcriptionStatus.toLowerCase()}
+                      </span>
+                    )}
+                  </p>
                 </div>
                 <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${
                   rec.status === "PUBLISHED" ? "bg-green-100 text-green-700" :
@@ -380,6 +321,11 @@ export default function ContributorDashboard() {
             ))}
           </div>
         )}
+      </section>
+
+      {/* Payout Settings */}
+      <section className="mb-8">
+        <StripeConnectSetup />
       </section>
 
       {/* Incoming Calls */}

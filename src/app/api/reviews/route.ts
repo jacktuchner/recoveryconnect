@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
+import { supabase } from "@/lib/supabase";
+import { v4 as uuidv4 } from "uuid";
 
 export async function POST(req: NextRequest) {
   try {
@@ -29,8 +30,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const review = await prisma.review.create({
-      data: {
+    const { data: review, error } = await supabase
+      .from("Review")
+      .insert({
+        id: uuidv4(),
         authorId: userId,
         subjectId,
         recordingId,
@@ -39,9 +42,12 @@ export async function POST(req: NextRequest) {
         matchRelevance,
         helpfulness,
         comment,
-      },
-      include: { author: true },
-    });
+        createdAt: new Date().toISOString(),
+      })
+      .select("*, author:User!Review_authorId_fkey(*)")
+      .single();
+
+    if (error) throw error;
 
     return NextResponse.json(review, { status: 201 });
   } catch (error) {

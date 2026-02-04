@@ -5,6 +5,8 @@ import { useSearchParams, useRouter } from "next/navigation";
 import RecordingCard from "@/components/RecordingCard";
 import ContributorCard from "@/components/ContributorCard";
 import FilterSidebar from "@/components/FilterSidebar";
+import ContentAcknowledgmentModal from "@/components/ContentAcknowledgmentModal";
+import DisclaimerBanner from "@/components/DisclaimerBanner";
 
 function BrowseContent() {
   const searchParams = useSearchParams();
@@ -60,13 +62,17 @@ function BrowseContent() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold mb-2">Browse Recovery Content</h1>
-        <p className="text-gray-600">
-          Find recordings and contributors matched to your situation.
-        </p>
-      </div>
+    <ContentAcknowledgmentModal>
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold mb-2">Browse Recovery Content</h1>
+          <p className="text-gray-600">
+            Find recordings and contributors matched to your situation.
+          </p>
+        </div>
+
+        {/* Disclaimer Banner */}
+        <DisclaimerBanner dismissible />
 
       {/* Tab Switcher */}
       <div className="flex gap-1 bg-gray-100 rounded-lg p-1 w-fit mb-8">
@@ -200,6 +206,7 @@ function BrowseContent() {
         </div>
       </div>
     </div>
+    </ContentAcknowledgmentModal>
   );
 }
 
