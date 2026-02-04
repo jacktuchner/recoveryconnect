@@ -94,7 +94,11 @@ export async function POST(req: NextRequest) {
         }));
 
         // Insert flags (ignore errors if ContentFlag table doesn't exist yet)
-        await supabase.from("ContentFlag").insert(flagRecords).catch(() => {});
+        try {
+          await supabase.from("ContentFlag").insert(flagRecords);
+        } catch {
+          // Ignore errors
+        }
       }
 
       return NextResponse.json({
